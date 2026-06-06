@@ -1,0 +1,147 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import { Clock, MapPin } from 'lucide-react';
+
+// Custom icons using HTML strings to render simple circles/SVG
+const ambulanceIcon = new L.DivIcon({
+  className: 'custom-icon',
+  html: `<div style="background-color: var(--accent-red); width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 17h4V5H2v12h3"/><path d="M20 17h2v-9l-9-4h-3v13h3"/><path d="M5.5 17a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Z"/><path d="M15.5 17a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Z"/></svg></div>`,
+  iconSize: [24, 24],
+  iconAnchor: [12, 12]
+});
+
+const hospitalIcon = new L.DivIcon({
+  className: 'custom-icon',
+  html: `<div style="background-color: var(--success); width: 32px; height: 32px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20"/><path d="M2 12h20"/></svg></div>`,
+  iconSize: [32, 32],
+  iconAnchor: [16, 16]
+});
+
+// A hook to update the map view to perfectly fit our route bounds
+function ChangeView({ bounds }) {
+  const map = useMap();
+  useEffect(() => {
+    if (bounds) {
+      map.fitBounds(bounds, { padding: [30, 30] });
+    }
+  }, [bounds, map]);
+  return null;
+}
+
+export default function MapSimulation({ hospitalName, onCancel, etaMinutes }) {
+  // A realistic route in Hyderabad, India (Banjara Hills to Jubilee Hills area)
+  const routeCoords = [
+    [17.4265, 78.4385], // Starting point (Banjara Hills)
+    [17.4250, 78.4300], 
+    [17.4220, 78.4200], 
+    [17.4170, 78.4150],
+    [17.4143, 78.4116]  // Ending point (Apollo Jubilee Hills area)
+  ];
+
+  const bounds = L.latLngBounds(routeCoords);
+  const totalDurationMs = 15000; // 15 seconds to simulate the drive
+  
+  const [currentCoord, setCurrentCoord] = useState(routeCoords[0]);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    let startTime = Date.now();
+    let animationFrame;
+
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      let p = elapsed / totalDurationMs;
+      
+      if (p >= 1) {
+        setProgress(1);
+        setCurrentCoord(routeCoords[routeCoords.length - 1]);
+        return;
+      }
+      
+      setProgress(p);
+
+      // Find the segment we are in
+      const nodeProgress = p * (routeCoords.length - 1);
+      const index = Math.floor(nodeProgress);
+      const segmentP = nodeProgress - index;
+
+      const [lat1, lon1] = routeCoords[index];
+      const [lat2, lon2] = routeCoords[Math.min(index + 1, routeCoords.length - 1)];
+
+      // Interpolate
+      const lat = lat1 + (lat2 - lat1) * segmentP;
+      const lon = lon1 + (lon2 - lon1) * segmentP;
+      
+      setCurrentCoord([lat, lon]);
+      animationFrame = requestAnimationFrame(animate);
+    };
+
+    animationFrame = requestAnimationFrame(animate);
+
+    return () => cancelAnimationFrame(animationFrame);
+  }, []);
+
+  // Calculate live ETA simulated
+  const liveEta = Math.max(0, Math.ceil(etaMinutes * (1 - progress)));
+
+  return (
+    <div className="w-full flex-col animate-fade-in" style={{ height: '400px', display: 'flex', flexDirection: 'column' }}>
+      
+      <div className="d-flex align-center justify-between p-3" style={{ backgroundColor: 'var(--success-light)', borderTopLeftRadius: '8px', borderTopRightRadius: '8px', border: '1px solid var(--success)', borderBottom: 'none' }}>
+        <div className="d-flex align-center gap-2 font-bold text-success">
+          <span className="pulse-alert d-inline-block" style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--success)' }}></span>
+          Live GPS Route Active: {hospitalName}
+        </div>
+        <div className="d-flex gap-4">
+          <div className="d-flex align-center gap-1 font-semibold text-sm">
+            <Clock size={16} /> ETA: {liveEta} min
+          </div>
+          <button onClick={onCancel} className="text-sm font-bold text-danger hover-lift" style={{ textDecoration: 'underline' }}>
+            Cancel Dispatch
+          </button>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, position: 'relative', border: '1px solid var(--border)', borderBottomLeftRadius: '8px', borderBottomRightRadius: '8px', overflow: 'hidden', zIndex: 0 }}>
+        <MapContainer 
+          bounds={bounds} 
+          scrollWheelZoom={false} 
+          style={{ height: '100%', width: '100%' }}
+        >
+          <ChangeView bounds={bounds} />
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          
+          <Polyline positions={routeCoords} color="var(--primary)" weight={4} opacity={0.5} dashArray="8, 8" />
+          <Polyline positions={routeCoords.slice(0, Math.ceil(progress * routeCoords.length))} color="var(--primary)" weight={5} />
+
+          {/* Hospital Destination */}
+          <Marker position={routeCoords[routeCoords.length - 1]} icon={hospitalIcon}>
+            <Popup>
+              <strong>{hospitalName}</strong><br/>
+              Trauma Bay Reserved
+            </Popup>
+          </Marker>
+
+          {/* Moving Ambulance */}
+          <Marker position={currentCoord} icon={ambulanceIcon} zIndexOffset={1000}>
+            <Popup>
+              Unit 402 - Active Transport
+            </Popup>
+          </Marker>
+
+        </MapContainer>
+      </div>
+
+      {progress >= 1 && (
+        <div className="mt-3 p-3 bg-green-50 rounded font-bold text-center text-success d-flex align-center justify-center gap-2" style={{ backgroundColor: 'var(--success-light)', border: '1px solid var(--success)' }}>
+          <MapPin size={20} /> Ambulance has arrived at {hospitalName}
+        </div>
+      )}
+    </div>
+  );
+}
